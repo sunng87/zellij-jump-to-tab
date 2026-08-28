@@ -1,0 +1,11 @@
+// Dev layout for working on the plugin: `zellij -l zellij.kdl` from this
+// directory. The plugin runs in a pane at the bottom; the top pane is free
+// for creating/renaming tabs while testing.
+layout {
+    pane split_direction="vertical" {
+        pane
+        pane size=14 {
+            plugin location="file:target/wasm32-wasip1/release/jump_to_tab.wasm"
+        }
+    }
+}

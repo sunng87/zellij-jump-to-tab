@@ -1,0 +1,18 @@
+[package]
+name = "jump-to-tab"
+version = "0.1.0"
+edition = "2021"
+description = "Zellij plugin: fuzzy-jump to a tab by typing its name"
+
+[dependencies]
+zellij-tile = "0.45.0"
+
+[[bin]]
+name = "jump_to_tab"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true
