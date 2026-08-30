@@ -33,9 +33,12 @@ Needs a rust toolchain with the `wasm32-wasip1` (aka `wasm32-wasi`) std.
 With nix/flakes this is provided by the included flake:
 
 ```sh
-nix develop -c cargo build --release
+nix develop -c cargo build --release --target wasm32-wasip1
 # -> target/wasm32-wasip1/release/jump_to_tab.wasm
 ```
+
+(Yes, `--target` is required — the devshell provides the wasm std but does
+not set a default target; without it cargo builds a useless host binary.)
 
 The plugin must be built against the same zellij version you run
 (`zellij-tile = "0.45.0"` here; bump Cargo.toml when zellij upgrades).

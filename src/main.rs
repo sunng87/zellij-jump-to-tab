@@ -59,6 +59,7 @@ impl ZellijPlugin for State {
             EventType::Visible,
             EventType::PermissionRequestResult,
         ]);
+        self.sync_cursor();
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -69,11 +70,13 @@ impl ZellijPlugin for State {
             },
             Event::Key(key) => {
                 self.handle_key(key);
+                self.sync_cursor();
                 true
             },
             Event::Visible(visible) => {
                 if visible {
                     self.reset();
+                    self.sync_cursor();
                 }
                 visible
             },
@@ -87,8 +90,11 @@ impl ZellijPlugin for State {
         self.rows = rows;
         self.cols = cols;
         print!("{}", self.render_ui());
-        // (x, y): after the "❯ " prompt + query, on the first row
-        show_cursor(Some((2 + self.query.chars().count(), 0)));
+        // NOTE: never call shim commands (show_cursor, …) from render()!
+        // On zellij 0.45.0 plugin commands and rendered content share one
+        // stdout stream: a command issued inside render() makes the host
+        // consume the rendered text while failing to parse the command,
+        // leaving the pane completely blank.
     }
 }
 
@@ -110,6 +116,12 @@ impl State {
         if self.selected >= len {
             self.selected = len.saturating_sub(1);
         }
+    }
+
+    /// Put the terminal cursor right after the query text ("❯ " + query).
+    /// Only ever called from `load`/`update` — see the note in `render`.
+    fn sync_cursor(&self) {
+        show_cursor(Some((2 + self.query.chars().count(), 0)));
     }
 
     /// Fresh session every time the popup opens.
