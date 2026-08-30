@@ -195,8 +195,7 @@ impl State {
                     let idx = c.to_digit(10).unwrap() as usize - 1;
                     if let Some(m) = self.matches().get(idx) {
                         let position = m.position;
-                        go_to_tab(position as u32 + 1); // go_to_tab is 1-indexed
-                        hide_self();
+                        self.jump_to(position);
                     }
                 } else {
                     self.query.push(c);
@@ -230,10 +229,10 @@ impl State {
     fn jump_selected(&mut self) {
         let matches = self.matches();
         if let Some(m) = matches.get(self.selected) {
-            let position = m.position;
-            go_to_tab(position as u32 + 1); // go_to_tab is 1-indexed
+            self.jump_to(m.position);
+        } else {
+            hide_self();
         }
-        hide_self();
     }
 
     /// Alt-tab style toggle: switch to the previously active tab.
@@ -242,9 +241,26 @@ impl State {
             .previous_tab
             .filter(|p| Some(*p) != self.current_tab)
         {
-            go_to_tab(prev as u32 + 1); // go_to_tab is 1-indexed
+            self.jump_to(prev);
+        } else {
+            hide_self();
         }
+    }
+
+    /// Switch tabs and close the finder with a fresh state for next time.
+    ///
+    /// `go_to_tab` from a plugin takes the 0-indexed `TabInfo.position`:
+    /// zellij's host side adds 1 to build `Action::GoToTab` and the screen
+    /// subtracts it back (`zellij_exports.rs`: `index: tab_index + 1`,
+    /// `screen.rs`: `switch_active_tab(index - 1)`) — so adding our own +1
+    /// lands one tab to the right.
+    fn jump_to(&mut self, position: usize) {
+        go_to_tab(position as u32);
+        // keep current/previous accurate before the TabUpdate arrives, so
+        // the preselect on next open is relative to the tab we just entered
+        self.previous_tab = self.current_tab.replace(position);
         hide_self();
+        self.reset();
     }
 }
 

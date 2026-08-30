@@ -99,9 +99,12 @@ cargo test-host        # alias for: cargo test --target x86_64-unknown-linux-gnu
 
 - The tab list comes from `Event::TabUpdate` (full `Vec<TabInfo>` pushed on
   every change — no polling), tracking `position`/`name`/`active`.
-- Jumping uses `go_to_tab(position + 1)` — the plugin API's `go_to_tab`
-  is **1-indexed** (verified against zellij 0.45.0's screen handler), and
-  position-based jumps stay correct even with duplicate tab names.
+- Jumping uses `go_to_tab(position)` with the 0-indexed `TabInfo.position`.
+  The plugin-facing `go_to_tab` is effectively 0-indexed on zellij 0.45:
+  the host wraps it as `Action::GoToTab { index: n + 1 }`
+  (`zellij_exports.rs`) and the screen switches with `switch_active_tab(index - 1)`
+  (`screen.rs`), so a `+1` of our own lands one tab too far. Position-based
+  jumps stay correct even with duplicate tab names.
 - The popup closes with `hide_self()`, not `close_self()`, so the plugin
   stays warm.
 - See `RESEARCH.md` for the full API survey this design is based on.
