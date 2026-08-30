@@ -77,8 +77,8 @@ keybinds {
 ```
 
 `floating true` makes it open as a centered overlay; `LaunchOrFocusPlugin`
-toggles: the same key focuses it if already open. The plugin hides itself
-(keeping its state) after every jump, so reopening is instant.
+toggles: the same key focuses it if already open. The plugin closes itself
+after every jump or `Esc`, so it reopens with a fresh, empty query.
 
 **Permissions:** on first use zellij will ask to grant
 `ReadApplicationState` (to receive the tab list) and
@@ -101,17 +101,3 @@ devshell binary has a loader mismatch):
 ```sh
 cargo test-host        # alias for: cargo test --target x86_64-unknown-linux-gnu
 ```
-
-## Design notes
-
-- The tab list comes from `Event::TabUpdate` (full `Vec<TabInfo>` pushed on
-  every change — no polling), tracking `position`/`name`/`active`.
-- Jumping uses `go_to_tab(position)` with the 0-indexed `TabInfo.position`.
-  The plugin-facing `go_to_tab` is effectively 0-indexed on zellij 0.45:
-  the host wraps it as `Action::GoToTab { index: n + 1 }`
-  (`zellij_exports.rs`) and the screen switches with `switch_active_tab(index - 1)`
-  (`screen.rs`), so a `+1` of our own lands one tab too far. Position-based
-  jumps stay correct even with duplicate tab names.
-- The popup closes with `hide_self()`, not `close_self()`, so the plugin
-  stays warm.
-- See `RESEARCH.md` for the full API survey this design is based on.

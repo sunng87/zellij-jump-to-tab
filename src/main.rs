@@ -177,7 +177,10 @@ impl State {
 
         match key.bare_key {
             BareKey::Enter if plain => self.jump_selected(),
-            BareKey::Esc if plain => hide_self(),
+            // close_self (not hide_self): on zellij 0.45, hiding leaves focus
+            // on the now-invisible pane — the session stops responding to
+            // keys. Closing destroys the pane and refocuses properly.
+            BareKey::Esc if plain => close_self(),
             BareKey::Tab if plain => self.toggle_last_tab(),
             BareKey::Up if plain => self.move_selection(-1),
             BareKey::Down if plain => self.move_selection(1),
@@ -231,7 +234,7 @@ impl State {
         if let Some(m) = matches.get(self.selected) {
             self.jump_to(m.position);
         } else {
-            hide_self();
+            close_self();
         }
     }
 
@@ -243,7 +246,7 @@ impl State {
         {
             self.jump_to(prev);
         } else {
-            hide_self();
+            close_self();
         }
     }
 
@@ -259,7 +262,10 @@ impl State {
         // keep current/previous accurate before the TabUpdate arrives, so
         // the preselect on next open is relative to the tab we just entered
         self.previous_tab = self.current_tab.replace(position);
-        hide_self();
+        // close, not hide: hiding on zellij 0.45 strands focus on the
+        // invisible pane (dead input); closing refocuses. The plugin unloads
+        // and reopens fresh (Default state = empty query), so no reset needed.
+        close_self();
         self.reset();
     }
 }
