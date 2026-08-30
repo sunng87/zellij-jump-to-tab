@@ -1,0 +1,46 @@
+# Build the wasm plugin and attach it to a GitHub release.
+#
+# Triggered by pushing a version tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # required to create releases with the built-in GITHUB_TOKEN
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+
+      # .cargo/config.toml defaults builds to wasm32-wasip1, which cannot run
+      # tests — test the fuzzy matcher on the runner's native target instead.
+      - name: Unit tests
+        run: cargo test --target x86_64-unknown-linux-gnu
+
+      - name: Build wasm
+        run: cargo build --release --target wasm32-wasip1
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WASM=target/wasm32-wasip1/release/jump_to_tab.wasm
+          test -s "$WASM"
+          # if the release already exists (e.g. re-run of a failed workflow),
+          # fall back to (re-)uploading the artifact
+          gh release create "$GITHUB_REF_NAME" "$WASM" \
+            --title "jump-to-tab $GITHUB_REF_NAME" \
+            --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" "$WASM" --clobber

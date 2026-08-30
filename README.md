@@ -50,11 +50,18 @@ zellij action start-or-reload-plugin file:$PWD/target/wasm32-wasip1/release/jump
 
 The plugin must be built against the same zellij version you run
 (`zellij-tile = "0.45.0"` here; bump Cargo.toml when zellij upgrades).
+Releases are tagged `v*` — pushing a tag triggers
+[.github/workflows/release.yml](.github/workflows/release.yml), which runs
+the unit tests, builds the wasm, and attaches it to a GitHub release.
 
 ## Install (keybinding)
 
+Either build from source (see [Build](#build)), or download
+`jump_to_tab.wasm` from the latest
+[release](https://github.com/sunng87/zellij-jump-to-tab/releases/latest).
+
 Add to your zellij config (`~/.config/zellij/config.kdl`) — replace the path
-with the absolute path to the built `.wasm` on your machine:
+with the absolute path to the `.wasm` on your machine:
 
 ```kdl
 keybinds {
