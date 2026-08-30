@@ -43,6 +43,10 @@ struct State {
     cols: usize,
     current_tab: Option<usize>,  // position of the active tab
     previous_tab: Option<usize>, // position of the previously active tab
+    /// preselect "next tab" as soon as the current tab is known; the first
+    /// TabUpdate may arrive before or after Visible(true), and with
+    /// close_self() every open is a fresh instance where neither ran yet
+    presel_pending: bool,
 }
 
 register_plugin!(State);
@@ -59,6 +63,8 @@ impl ZellijPlugin for State {
             EventType::Visible,
             EventType::PermissionRequestResult,
         ]);
+        // fresh instance: preselect the next tab once tab info arrives
+        self.presel_pending = true;
         self.sync_cursor();
     }
 
@@ -116,6 +122,8 @@ impl State {
         if self.selected >= len {
             self.selected = len.saturating_sub(1);
         }
+        // a fresh open may still be waiting for tab info to preselect
+        self.try_presel();
     }
 
     /// Put the terminal cursor right after the query text ("❯ " + query).
@@ -128,13 +136,26 @@ impl State {
     fn reset(&mut self) {
         self.query.clear();
         self.first_visible = 0;
-        // preselect the tab after the current one, so Enter with an empty
-        // query acts as "next tab"; wraps around to the first tab.
-        self.selected = self
-            .matches()
-            .iter()
-            .position(|m| self.current_tab.map_or(true, |c| m.position > c))
-            .unwrap_or(0);
+        self.presel_pending = true;
+        self.try_presel();
+    }
+
+    /// Preselect the tab after the current one, so Enter with an empty query
+    /// acts as "next tab"; wraps to the first tab. Deferred until the current
+    /// tab is known (TabUpdate may arrive after the popup opens) and
+    /// cancelled by any keypress (the user took over).
+    fn try_presel(&mut self) {
+        if !self.presel_pending || self.query.chars().count() > 0 {
+            return;
+        }
+        if let Some(current) = self.current_tab {
+            self.selected = self
+                .matches()
+                .iter()
+                .position(|m| m.position > current)
+                .unwrap_or(0);
+            self.presel_pending = false;
+        }
     }
 
     fn matches(&self) -> Vec<Match> {
@@ -169,11 +190,20 @@ impl State {
 
 impl State {
     fn handle_key(&mut self, key: KeyWithModifier) {
+        // any keypress means the user took over — stop auto-preselecting
+        self.presel_pending = false;
+
         // only plain (optionally shifted) keys drive the finder
         let plain = key
             .key_modifiers
             .iter()
             .all(|m| matches!(m, KeyModifier::Shift));
+        // exactly Ctrl, no other modifiers
+        let ctrl = key.key_modifiers.contains(&KeyModifier::Ctrl)
+            && key
+                .key_modifiers
+                .iter()
+                .all(|m| matches!(m, KeyModifier::Ctrl));
 
         match key.bare_key {
             BareKey::Enter if plain => self.jump_selected(),
@@ -184,6 +214,9 @@ impl State {
             BareKey::Tab if plain => self.toggle_last_tab(),
             BareKey::Up if plain => self.move_selection(-1),
             BareKey::Down if plain => self.move_selection(1),
+            // readline-style: ctrl-n/ctrl-p move down/up
+            BareKey::Char('n') if ctrl => self.move_selection(1),
+            BareKey::Char('p') if ctrl => self.move_selection(-1),
             BareKey::Backspace if plain => {
                 self.query.pop();
                 self.after_query_change();
@@ -326,7 +359,7 @@ impl State {
 
         // footer
         out.push_str(&format!(
-            "{DIM}1-9 quick-jump · ↑↓ select · ⏎ jump · tab last · esc close{RESET}"
+            "{DIM}1-9 quick-jump · ↑↓/⌃n⌃p select · ⏎ jump · tab last · esc close{RESET}"
         ));
 
         out
