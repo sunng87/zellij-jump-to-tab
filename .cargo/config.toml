@@ -1,0 +1,13 @@
+# Always build for zellij's wasm target, even when someone forgets --target.
+# Without this, `cargo build --release` silently produces a useless host
+# binary and the old .wasm keeps running.
+#
+# Note: this needs the wasm32-wasip1 std — build inside `nix develop`.
+# Outside the devshell cargo fails loudly (E0463 "can't find crate for
+# `core`"), which is exactly what we want instead of a silent host build.
+[build]
+target = "wasm32-wasip1"
+
+[alias]
+# unit tests must run on the host (explicit --target overrides the default)
+test-host = "test --target x86_64-unknown-linux-gnu"

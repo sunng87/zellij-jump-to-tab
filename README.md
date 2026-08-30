@@ -33,12 +33,20 @@ Needs a rust toolchain with the `wasm32-wasip1` (aka `wasm32-wasi`) std.
 With nix/flakes this is provided by the included flake:
 
 ```sh
-nix develop -c cargo build --release --target wasm32-wasip1
+nix develop -c cargo build --release
 # -> target/wasm32-wasip1/release/jump_to_tab.wasm
 ```
 
-(Yes, `--target` is required — the devshell provides the wasm std but does
-not set a default target; without it cargo builds a useless host binary.)
+The project's `.cargo/config.toml` sets `wasm32-wasip1` as the default
+build target, so no `--target` flag is needed. Outside the devshell the
+build fails loudly (the host toolchain has no wasm std) instead of
+silently producing a host binary.
+
+Reloading the plugin in a running session (no zellij restart needed):
+
+```sh
+zellij action start-or-reload-plugin file:$PWD/target/wasm32-wasip1/release/jump_to_tab.wasm
+```
 
 The plugin must be built against the same zellij version you run
 (`zellij-tile = "0.45.0"` here; bump Cargo.toml when zellij upgrades).
@@ -78,12 +86,13 @@ zellij -l zellij.kdl
 ```
 
 The dev layout runs the plugin in a bottom pane next to a scratch terminal.
-Iterate: edit → `cargo build --release` → reopen. The unit tests for the
+Iterate: edit → `nix develop -c cargo build --release` → reload with
+`zellij action start-or-reload-plugin` (see Build). The unit tests for the
 fuzzy matcher run on the host target (use your host cargo — the pure nix
 devshell binary has a loader mismatch):
 
 ```sh
-cargo test --target x86_64-unknown-linux-gnu
+cargo test-host        # alias for: cargo test --target x86_64-unknown-linux-gnu
 ```
 
 ## Design notes
