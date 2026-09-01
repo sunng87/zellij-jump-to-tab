@@ -21,7 +21,7 @@ Type part of a tab name, hit Enter, jump. No mouse, no tab-bar hunting.
 |---|---|
 | type | fuzzy-filter the tab list (matched chars highlighted) |
 | `1`–`9` | jump straight to the Nth visible match (only when query is empty) |
-| `↑` `↓` / `Ctrl n` `Ctrl p` / `tab`-nav | move selection (wraps) |
+| `↑` `↓` / `Ctrl n` `Ctrl p` / `Alt Tab` `Alt Shift Tab` | move selection (wraps) |
 | `Enter` | jump to the selected tab; with an empty query, jumps to the next tab |
 | `Tab` | toggle to the previously active tab (Alt-Tab style) |
 | `Backspace` / `Delete` | delete one char / clear the query |

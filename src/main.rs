@@ -204,6 +204,13 @@ impl State {
                 .key_modifiers
                 .iter()
                 .all(|m| matches!(m, KeyModifier::Ctrl));
+        // exactly Alt, optionally with Shift
+        let alt = key.key_modifiers.contains(&KeyModifier::Alt)
+            && key
+                .key_modifiers
+                .iter()
+                .all(|m| matches!(m, KeyModifier::Alt | KeyModifier::Shift));
+        let alt_shift = alt && key.key_modifiers.contains(&KeyModifier::Shift);
 
         match key.bare_key {
             BareKey::Enter if plain => self.jump_selected(),
@@ -212,6 +219,9 @@ impl State {
             // keys. Closing destroys the pane and refocuses properly.
             BareKey::Esc if plain => close_self(),
             BareKey::Tab if plain => self.toggle_last_tab(),
+            // alt-tab / alt-shift-tab move down/up
+            BareKey::Tab if alt && !alt_shift => self.move_selection(1),
+            BareKey::Tab if alt_shift => self.move_selection(-1),
             BareKey::Up if plain => self.move_selection(-1),
             BareKey::Down if plain => self.move_selection(1),
             // readline-style: ctrl-n/ctrl-p move down/up
