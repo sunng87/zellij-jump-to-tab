@@ -6,7 +6,15 @@
 mod fuzzy;
 
 use std::collections::BTreeMap;
+use unicode_width::UnicodeWidthStr;
 use zellij_tile::prelude::*;
+
+/// Display width of a string in terminal columns. Emoji and CJK chars are
+/// 2 columns wide — counting chars instead makes padded rows overflow and
+/// wrap (e.g. the pane count landing on the next line).
+fn display_width(s: &str) -> usize {
+    s.width()
+}
 
 // ---------------------------------------------------------------------------
 // styling
@@ -73,19 +81,19 @@ impl ZellijPlugin for State {
             Event::TabUpdate(tabs) => {
                 self.update_tabs(tabs);
                 true
-            },
+            }
             Event::Key(key) => {
                 self.handle_key(key);
                 self.sync_cursor();
                 true
-            },
+            }
             Event::Visible(visible) => {
                 if visible {
                     self.reset();
                     self.sync_cursor();
                 }
                 visible
-            },
+            }
             // re-render once permissions are granted (TabUpdate arrives then)
             Event::PermissionRequestResult(_) => true,
             _ => false,
@@ -129,7 +137,7 @@ impl State {
     /// Put the terminal cursor right after the query text ("❯ " + query).
     /// Only ever called from `load`/`update` — see the note in `render`.
     fn sync_cursor(&self) {
-        show_cursor(Some((2 + self.query.chars().count(), 0)));
+        show_cursor(Some((2 + display_width(&self.query), 0)));
     }
 
     /// Fresh session every time the popup opens.
@@ -230,11 +238,11 @@ impl State {
             BareKey::Backspace if plain => {
                 self.query.pop();
                 self.after_query_change();
-            },
+            }
             BareKey::Delete if plain => {
                 self.query.clear();
                 self.after_query_change();
-            },
+            }
             BareKey::Char(c) if plain => {
                 // with an empty query, 1-9 jump straight to the Nth match
                 if self.query.is_empty() && ('1'..='9').contains(&c) {
@@ -247,8 +255,8 @@ impl State {
                     self.query.push(c);
                     self.after_query_change();
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
@@ -283,10 +291,7 @@ impl State {
 
     /// Alt-tab style toggle: switch to the previously active tab.
     fn toggle_last_tab(&mut self) {
-        if let Some(prev) = self
-            .previous_tab
-            .filter(|p| Some(*p) != self.current_tab)
-        {
+        if let Some(prev) = self.previous_tab.filter(|p| Some(*p) != self.current_tab) {
             self.jump_to(prev);
         } else {
             close_self();
@@ -322,7 +327,10 @@ impl State {
         let mut out = String::new();
 
         // row 0: prompt + query
-        out.push_str(&format!("{BOLD}{CYAN}❯{RESET} {}{DIM}▏{RESET}\n", self.query));
+        out.push_str(&format!(
+            "{BOLD}{CYAN}❯{RESET} {}{DIM}▏{RESET}\n",
+            self.query
+        ));
         // row 1: blank
         out.push('\n');
 
@@ -391,8 +399,8 @@ impl State {
         let active_marker = if m.is_active { "● " } else { "" };
         let meta = format!("{}{}p", active_marker, m.pane_count);
 
-        // 4 cols of prefix ("❯ 1 ") + gap + meta
-        let name_budget = self.cols.saturating_sub(4 + meta.chars().count() + 1);
+        // 4 cols of prefix ("❯ 1 ") + gap + meta — all in display columns
+        let name_budget = self.cols.saturating_sub(4 + display_width(&meta) + 1);
 
         let base = if selected {
             format!("{BOLD}{WHITE}")
@@ -401,10 +409,14 @@ impl State {
         };
         let mut name = base.clone();
         let mut name_len = 0usize;
-        for (i, ch) in m.name.chars().enumerate() {
-            if name_len + 1 > name_budget {
-                name.push('…');
-                name_len += 1;
+        for (i, ch, ch_width) in self.name_char_widths(&m.name) {
+            if name_len + ch_width > name_budget {
+                // truncate — but only add the ellipsis if it actually fits,
+                // otherwise the row overflows by one column and wraps
+                if name_len + 1 <= name_budget {
+                    name.push('…');
+                    name_len += 1;
+                }
                 break;
             }
             if m.matched.contains(&i) {
@@ -413,7 +425,7 @@ impl State {
             } else {
                 name.push(ch);
             }
-            name_len += 1;
+            name_len += ch_width;
         }
 
         let pad = name_budget.saturating_sub(name_len) + 1;
@@ -421,5 +433,115 @@ impl State {
             "{pointer} {DIM}{quick}{RESET} {name}{}{DIM}{meta}{RESET}",
             " ".repeat(pad)
         )
+    }
+
+    /// Per-char display widths of a tab name, in the same order as
+    /// `chars()` (so indices line up with the fuzzy-match highlights).
+    ///
+    /// Measured as prefix-width differences instead of per-char
+    /// `width()` so emoji presentation sequences ("▶️" = U+25B6 +
+    /// U+FE0F) report their true 2-column width: the crate only folds
+    /// those in when measuring a string. ZWJ emoji families can
+    /// over-count here, which only widens the gap — never wraps.
+    fn name_char_widths(&self, name: &str) -> Vec<(usize, char, usize)> {
+        let chars: Vec<char> = name.chars().collect();
+        let mut widths = Vec::with_capacity(chars.len());
+        let mut prev = 0usize;
+        for (i, &ch) in chars.iter().enumerate() {
+            let upto: String = chars[..=i].iter().collect();
+            let w = upto.width();
+            widths.push((i, ch, w.saturating_sub(prev)));
+            prev = w;
+        }
+        widths
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                // skip until the final 'm' of an SGR sequence
+                for c2 in chars.by_ref() {
+                    if c2 == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn make_match(name: &str, pane_count: usize, is_active: bool) -> Match {
+        Match {
+            position: 0,
+            name: name.into(),
+            pane_count,
+            is_active,
+            matched: vec![],
+        }
+    }
+
+    #[test]
+    fn display_width_basics() {
+        assert_eq!(display_width("abc"), 3);
+        assert_eq!(display_width("\u{1f980}"), 2); // crab is 2 cols
+        assert_eq!(display_width("a\u{1f980}b"), 4);
+        // emoji presentation sequence: 2 cols as a string
+        assert_eq!(display_width("\u{25b6}\u{fe0f}"), 2);
+    }
+
+    #[test]
+    fn row_with_emoji_fits_within_cols() {
+        for cols in [40usize, 60, 80] {
+            let mut st = State::default();
+            st.cols = cols;
+            let m = make_match("\u{1f980} server with an emoji title", 3, true);
+            let row = strip_ansi(&st.render_match(0, &m));
+            assert!(
+                display_width(row.trim_end()) <= cols,
+                "cols={cols}: row is {} cols wide: {:?}",
+                display_width(row.trim_end()),
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_emoji_row_fits_within_cols() {
+        for cols in [20usize, 30, 50] {
+            let mut st = State::default();
+            st.cols = cols;
+            let m = make_match(
+                "\u{1f980}\u{1f980}\u{1f980}\u{1f980}\u{1f980}\u{1f980}\u{1f980}\u{1f980} very long emoji name",
+                12,
+                false,
+            );
+            let row = strip_ansi(&st.render_match(0, &m));
+            assert!(
+                display_width(row.trim_end()) <= cols,
+                "cols={cols}: row is {} cols wide: {:?}",
+                display_width(row.trim_end()),
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn emoji_row_keeps_meta_on_same_line() {
+        // the reported bug: pane count wrapped to the next line
+        let mut st = State::default();
+        st.cols = 40;
+        let m = make_match("\u{1f980} tab", 3, false);
+        let row = strip_ansi(&st.render_match(0, &m));
+        assert!(row.contains("3p"), "meta missing from row: {:?}", row);
+        assert!(!row.contains('\n'));
     }
 }

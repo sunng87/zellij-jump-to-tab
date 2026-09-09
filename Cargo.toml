@@ -6,6 +6,7 @@ description = "Zellij plugin: fuzzy-jump to a tab by typing its name"
 
 [dependencies]
 zellij-tile = "0.45.0"
+unicode-width = "0.2"
 
 [[bin]]
 name = "jump_to_tab"
