@@ -34,6 +34,15 @@
               (rustToolchain system)
               pkgs.zellij # run the dev layout: zellij -l zellij.kdl
               pkgs.stdenv.cc # host linker, so `cargo test-host` links in-shell
+              # host test builds compile zellij-tile's transitive host deps
+              # (isahc -> curl -> openssl-sys); resolve them through nix
+              # instead of the ambient system headers so tests build
+              # hermetically in CI too. curl must be present, or curl-sys
+              # silently falls back to ambient /usr/lib
+              pkgs.pkg-config
+              pkgs.openssl
+              pkgs.zlib
+              pkgs.curl
             ];
             RUST_SRC_PATH = "${(rustToolchain system)}/lib/rustlib/src/rust/library";
           };
