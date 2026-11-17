@@ -1,0 +1,48 @@
+# CI: build the plugin entirely through the nix flake environment.
+#
+# - `nix build` compiles the wasm for wasm32-wasip1 via the flake's
+#   pkgsCross.wasm32-wasip1 rustPlatform (the same artifact `nix build`
+#   produces locally; the release workflow keeps its own rustup setup).
+# - `nix develop -c cargo test-host` runs the fuzzy-matcher unit tests on
+#   the host target inside the flake devshell.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          # fenix toolchains are published to the nix-community cache —
+          # without this substituter CI would build rustc from source
+          extra_nix_config: |
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FZ9q5RCmYzsmn1ZP0AAfX4IvjRfoo7p26C8cRTSI=
+
+      - name: Evaluate flake
+        run: nix flake check
+
+      - name: Build wasm plugin
+        run: nix build
+
+      - name: Unit tests (host target, flake devshell)
+        run: nix develop -c cargo test-host
+
+      - name: Upload wasm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: jump_to_tab.wasm
+          path: result/jump_to_tab.wasm
+          if-no-files-found: error
