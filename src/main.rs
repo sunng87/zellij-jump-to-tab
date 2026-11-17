@@ -39,6 +39,20 @@ struct Match {
     pane_count: usize,
     is_active: bool,
     matched: Vec<usize>, // highlighted char indices into `name`
+    /// zellij 0.46+ attention state (inbox/"program status" system)
+    attention: TabAttention,
+    /// pending or flashing bell (counts as NeedsYou, like the tab bar)
+    bell: bool,
+}
+
+/// What a tab's attention marker looks like — mirrors zellij 0.46's own
+/// tab bar (`TabMarker::for_tab` in default-plugins/bars): muted tabs show
+/// a dim ⊘ regardless of status, "counted" statuses (needs-you / failed /
+/// done / working) show their symbol, a bell degrades to needs-you, and
+/// Quiet/NewOutput show nothing (the tab bar skips them too).
+enum AttentionKind {
+    Muted,
+    Status(AttentionStatus),
 }
 
 #[derive(Default)]
@@ -173,6 +187,8 @@ impl State {
             pane_count: t.selectable_tiled_panes_count + t.selectable_floating_panes_count,
             is_active: t.active,
             matched,
+            attention: t.attention.clone(),
+            bell: t.has_bell_notification || t.is_flashing_bell,
         };
 
         if self.query.is_empty() {
@@ -323,6 +339,51 @@ impl State {
 // ---------------------------------------------------------------------------
 
 impl State {
+    fn attention_kind(&self, m: &Match) -> Option<AttentionKind> {
+        if m.attention.muted {
+            return Some(AttentionKind::Muted);
+        }
+        if m.attention.status.is_counted() {
+            Some(AttentionKind::Status(m.attention.status))
+        } else if m.bell {
+            // a bell without a counted status still needs you
+            Some(AttentionKind::Status(AttentionStatus::NeedsYou))
+        } else {
+            None
+        }
+    }
+
+    /// Styled marker for the 2-column attention slot; `None` when the tab
+    /// has no marker. Colors follow zellij's urgency model: needs-you and
+    /// failed are urgent (bold), done/working are calm, muted is dim.
+    fn attention_marker(&self, m: &Match) -> Option<String> {
+        match self.attention_kind(m)? {
+            AttentionKind::Muted => Some(format!("{DIM}⊘{RESET} ")),
+            AttentionKind::Status(status) => {
+                let count = m.attention.counts.of(status);
+                // symbol alone, or symbol + count when several panes share
+                // the status — padded to exactly 2 columns
+                let plain = if count > 9 {
+                    format!("{}+", status.marker(false))
+                } else if count > 1 {
+                    format!("{}{}", status.marker(false), count)
+                } else {
+                    format!("{}", status.marker(false))
+                };
+                let pad = " ".repeat(2usize.saturating_sub(display_width(&plain)));
+                let styled = match status {
+                    AttentionStatus::NeedsYou | AttentionStatus::Failed => {
+                        format!("{BOLD}{RED}{plain}{RESET}")
+                    }
+                    AttentionStatus::Done => format!("{GREEN}{plain}{RESET}"),
+                    AttentionStatus::Working => format!("{CYAN}{plain}{RESET}"),
+                    _ => format!("{DIM}{plain}{RESET}"),
+                };
+                Some(format!("{styled}{pad}"))
+            }
+        }
+    }
+
     fn render_ui(&mut self) -> String {
         let mut out = String::new();
 
@@ -362,9 +423,11 @@ impl State {
                 }
             }
 
+            let show_marker_col = matches.iter().any(|m| self.attention_kind(m).is_some());
+
             for (display_index, m) in shown.iter().enumerate() {
                 let row = self.first_visible + display_index;
-                out.push_str(&self.render_match(row, m));
+                out.push_str(&self.render_match(row, m, show_marker_col));
                 out.push('\n');
             }
 
@@ -383,7 +446,7 @@ impl State {
         out
     }
 
-    fn render_match(&self, display_index: usize, m: &Match) -> String {
+    fn render_match(&self, display_index: usize, m: &Match, show_marker_col: bool) -> String {
         let selected = display_index == self.selected;
         let quick = if display_index < 9 {
             ((b'1' + display_index as u8) as char).to_string()
@@ -399,8 +462,14 @@ impl State {
         let active_marker = if m.is_active { "● " } else { "" };
         let meta = format!("{}{}p", active_marker, m.pane_count);
 
-        // 4 cols of prefix ("❯ 1 ") + gap + meta — all in display columns
-        let name_budget = self.cols.saturating_sub(4 + display_width(&meta) + 1);
+        // 4 cols of prefix ("❯ 1 ") + attention slot + gap + meta — all in
+        // display columns. The attention slot only exists when some tab in
+        // the list has a marker, so attention-free sessions keep the old,
+        // wider name budget.
+        let marker_width = if show_marker_col { 2 } else { 0 };
+        let name_budget = self
+            .cols
+            .saturating_sub(4 + marker_width + display_width(&meta) + 1);
 
         let base = if selected {
             format!("{BOLD}{WHITE}")
@@ -429,8 +498,13 @@ impl State {
         }
 
         let pad = name_budget.saturating_sub(name_len) + 1;
+        let marker = if show_marker_col {
+            self.attention_marker(m).unwrap_or_else(|| "  ".to_string())
+        } else {
+            String::new()
+        };
         format!(
-            "{pointer} {DIM}{quick}{RESET} {name}{}{DIM}{meta}{RESET}",
+            "{pointer} {DIM}{quick}{RESET} {name}{}{marker}{DIM}{meta}{RESET}",
             " ".repeat(pad)
         )
     }
@@ -486,6 +560,19 @@ mod tests {
             pane_count,
             is_active,
             matched: vec![],
+            attention: TabAttention::default(),
+            bell: false,
+        }
+    }
+
+    fn make_attention_match(status: AttentionStatus, counts: AttentionCounts, muted: bool) -> Match {
+        Match {
+            attention: TabAttention {
+                status,
+                counts,
+                muted,
+            },
+            ..make_match("server", 2, false)
         }
     }
 
@@ -504,7 +591,7 @@ mod tests {
             let mut st = State::default();
             st.cols = cols;
             let m = make_match("\u{1f980} server with an emoji title", 3, true);
-            let row = strip_ansi(&st.render_match(0, &m));
+            let row = strip_ansi(&st.render_match(0, &m, false));
             assert!(
                 display_width(row.trim_end()) <= cols,
                 "cols={cols}: row is {} cols wide: {:?}",
@@ -524,7 +611,7 @@ mod tests {
                 12,
                 false,
             );
-            let row = strip_ansi(&st.render_match(0, &m));
+            let row = strip_ansi(&st.render_match(0, &m, false));
             assert!(
                 display_width(row.trim_end()) <= cols,
                 "cols={cols}: row is {} cols wide: {:?}",
@@ -540,8 +627,156 @@ mod tests {
         let mut st = State::default();
         st.cols = 40;
         let m = make_match("\u{1f980} tab", 3, false);
-        let row = strip_ansi(&st.render_match(0, &m));
+        let row = strip_ansi(&st.render_match(0, &m, false));
         assert!(row.contains("3p"), "meta missing from row: {:?}", row);
         assert!(!row.contains('\n'));
     }
+
+    #[test]
+    fn attention_markers_mirror_the_tab_bar() {
+        let mut st = State::default();
+        st.cols = 60;
+        let cases = [
+            (AttentionStatus::NeedsYou, "●"),
+            (AttentionStatus::Failed, "✗"),
+            (AttentionStatus::Done, "✓"),
+            (AttentionStatus::Working, "◐"),
+        ];
+        for (status, symbol) in cases {
+            let m = make_attention_match(status, AttentionCounts::default(), false);
+            let row = strip_ansi(&st.render_match(0, &m, true));
+            assert!(
+                row.contains(symbol),
+                "{:?} row missing {}: {:?}",
+                status,
+                symbol,
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn quiet_new_output_and_idle_have_no_marker() {
+        let mut st = State::default();
+        st.cols = 60;
+        for status in [
+            AttentionStatus::Idle,
+            AttentionStatus::Quiet,
+            AttentionStatus::NewOutput,
+        ] {
+            let m = make_attention_match(status, AttentionCounts::default(), false);
+            let row = strip_ansi(&st.render_match(0, &m, true));
+            // a blank 2-col slot, not a symbol
+            assert!(
+                !row.contains('✓') && !row.contains('✗') && !row.contains('●'),
+                "{:?} row: {:?}",
+                status,
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn muted_tab_shows_dim_zero_slash() {
+        let mut st = State::default();
+        st.cols = 60;
+        // muted wins even with an active status — same as the native tab bar
+        let m = make_attention_match(
+            AttentionStatus::NeedsYou,
+            AttentionCounts::default(),
+            true,
+        );
+        let row = strip_ansi(&st.render_match(0, &m, true));
+        assert!(row.contains('⊘'), "muted marker missing: {:?}", row);
+        assert!(!row.contains('●'), "status leaked through mute: {:?}", row);
+    }
+
+    #[test]
+    fn bell_without_status_shows_needs_you() {
+        let mut st = State::default();
+        st.cols = 60;
+        let m = Match {
+            bell: true,
+            ..make_attention_match(AttentionStatus::Idle, AttentionCounts::default(), false)
+        };
+        let row = strip_ansi(&st.render_match(0, &m, true));
+        assert!(row.contains('●'), "bell marker missing: {:?}", row);
+    }
+
+    #[test]
+    fn multiple_panes_of_one_status_show_a_count() {
+        let mut st = State::default();
+        st.cols = 60;
+        let m = make_attention_match(
+            AttentionStatus::Failed,
+            AttentionCounts {
+                failed: 3,
+                ..Default::default()
+            },
+            false,
+        );
+        let row = strip_ansi(&st.render_match(0, &m, true));
+        assert!(row.contains("✗3"), "count missing: {:?}", row);
+    }
+
+    #[test]
+    fn marker_row_fits_within_cols() {
+        for cols in [30usize, 40, 60] {
+            let mut st = State::default();
+            st.cols = cols;
+            let m = make_attention_match(
+                AttentionStatus::NeedsYou,
+                AttentionCounts {
+                    needs_you: 12,
+                    ..Default::default()
+                },
+                false,
+            );
+            let row = strip_ansi(&st.render_match(0, &m, true));
+            assert!(
+                row.contains("●+"),
+                "cols={cols}: count marker missing: {:?}",
+                row
+            );
+            assert!(
+                display_width(row.trim_end()) <= cols,
+                "cols={cols}: row is {} cols wide: {:?}",
+                display_width(row.trim_end()),
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn marker_slot_is_two_columns_so_rows_align() {
+        // regression: the marker used to lose its padding space, shifting
+        // the meta column left by one on marker rows
+        let mut st = State::default();
+        st.cols = 60;
+        let with_marker = strip_ansi(&st.render_match(
+            1,
+            &make_attention_match(
+                AttentionStatus::NeedsYou,
+                AttentionCounts::default(),
+                false,
+            ),
+            true,
+        ));
+        let without = strip_ansi(&st.render_match(0, &make_match("server", 2, false), true));
+        assert!(
+            with_marker.contains("● 2p"),
+            "marker not 2 cols wide: {:?}",
+            with_marker
+        );
+        // meta column starts at the same offset in both rows
+        let meta_at = |row: &str| display_width(&row[..row.find('p').unwrap()]);
+        assert_eq!(
+            meta_at(&with_marker),
+            meta_at(&without),
+            "meta misaligned:\n  {:?}\n  {:?}",
+            with_marker,
+            without
+        );
+    }
 }
+

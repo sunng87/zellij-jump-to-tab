@@ -5,7 +5,7 @@ edition = "2021"
 description = "Zellij plugin: fuzzy-jump to a tab by typing its name"
 
 [dependencies]
-zellij-tile = "0.45.0"
+zellij-tile = "0.46.0"
 unicode-width = "0.2"
 
 [[bin]]
