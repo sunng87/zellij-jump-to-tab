@@ -142,3 +142,31 @@ like `zhop`/`room` get harpoon-style global jumps. Start without it.
 
 This survey was made against the published crate sources:
 `zellij-tile 0.45.0` and `zellij-utils 0.45.0` (from crates.io).
+
+## Addendum: zellij 0.46 attention/inbox (2026-11)
+
+The plugin now builds against `zellij-tile 0.46.0` (installed zellij is
+0.46.0; the wasm must match the host major or it is rejected).
+
+- `TabInfo` gained `attention: TabAttention { status, counts, muted }` plus
+  `has_bell_notification` / `is_flashing_bell`. It arrives with every
+  `Event::TabUpdate` — no extra subscription or permission needed. The
+  server re-sends `TabUpdate` whenever attention changes
+  (`Screen::flush_attention` → `generate_and_report_tab_state`), so the
+  indicator is live while the popup is open.
+- Native tab-bar semantics (default-plugins/bars `TabMarker::for_tab`):
+  muted → dim `⊘`; counted statuses (`is_counted`: NeedsYou/Failed/Done/
+  Working) → their `AttentionStatus::marker()` symbol (● ✗ ✓ ◐), bold for
+  urgent (NeedsYou/Failed); a bell without status → NeedsYou; Quiet and
+  NewOutput → nothing. We mirror this exactly.
+- `AttentionCounts` carries per-status pane counts per tab; we render a
+  count digit (>1) or `+` (>9) in the marker slot.
+- If the user sets `attention { tab_markers false }` (or `enabled false`),
+  the server zeroes the per-tab status but keeps `muted` — the plugin then
+  naturally shows no markers (muted `⊘` still possible).
+- Smoke-test gotchas: `zellij -s NAME --layout FILE` means "add tabs to an
+  *existing* session NAME" on 0.46 — to start fresh, omit `-s`. The plugin
+  permission cache (`~/.cache/zellij/permissions.kdl`) keys on the plugin
+  location string: a relative `file:target/...` layout path does not match
+  the cached absolute path and will prompt. Dev layout keeps its relative
+  path (prompt once, answer y).

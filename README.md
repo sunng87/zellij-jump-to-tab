@@ -3,17 +3,38 @@
 A [zellij](https://zellij.dev) plugin: a popup fuzzy-finder over your tabs.
 Type part of a tab name, hit Enter, jump. No mouse, no tab-bar hunting.
 
+Requires zellij 0.46+ (built against `zellij-tile 0.46.0`); on older
+zellij versions the wasm is rejected as incompatible.
+
 ```
 ┌─ jump to tab ─────────────────────────┐
 │ ❯ serv▏                               │
 │                                       │
 │   1 research        ● 3p              │
-│ ❯ 2 server            2p              │
-│   3 server-logs       1p              │
+│ ❯ 2 server          ◐ 2p              │
+│   3 builds          ✗2 1p             │
+│   4 logs              1p              │
 │                                       │
 │ 1-9 quick-jump · ↑↓ select · ⏎ jump…  │
 └───────────────────────────────────────┘
 ```
+
+### Attention indicators (zellij 0.46+)
+
+On zellij 0.46+ each row can carry an inbox/attention marker between the
+name and the pane count, mirroring the native tab bar:
+
+| marker | meaning |
+|---|---|
+| `●` (bold red) | needs you — inbox notification, bell, or blocked program |
+| `✗` (bold red) | a command failed |
+| `✓` (green) | a long-running command finished successfully |
+| `◐` (cyan) | a command is running |
+| `⊘` (dim) | attention muted for this tab |
+| `✗2`, `●+` | several panes share the status (count, `+` for 10+) |
+
+Quiet/new-output panes don't get a marker — same as the tab bar. A digit
+after the marker is the number of panes in that state.
 
 ## Controls
 
