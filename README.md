@@ -75,6 +75,10 @@ Releases are tagged `v*` — pushing a tag triggers
 [.github/workflows/release.yml](.github/workflows/release.yml), which runs
 the unit tests, builds the wasm, and attaches it to a GitHub release.
 
+`nix build` produces the same wasm as a store path
+(`result/jump_to_tab.wasm`), built with nixpkgs' wasm32-wasip1 rustPlatform —
+useful for CI or a one-off install without entering the devshell.
+
 ## Install (keybinding)
 
 Either build from source (see [Build](#build)), or download
@@ -116,8 +120,8 @@ zellij -l zellij.kdl
 The dev layout runs the plugin in a bottom pane next to a scratch terminal.
 Iterate: edit → `nix develop -c cargo build --release` → reload with
 `zellij action start-or-reload-plugin` (see Build). The unit tests for the
-fuzzy matcher run on the host target (use your host cargo — the pure nix
-devshell binary has a loader mismatch):
+fuzzy matcher run on the host target — the devshell ships a host linker, so
+they work straight from `nix develop`:
 
 ```sh
 cargo test-host        # alias for: cargo test --target x86_64-unknown-linux-gnu

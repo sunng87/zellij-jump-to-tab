@@ -8,6 +8,13 @@ description = "Zellij plugin: fuzzy-jump to a tab by typing its name"
 zellij-tile = "0.46.0"
 unicode-width = "0.2"
 
+# The plugin never uses this directly: enabling zellij-utils' vendored_curl
+# makes the host unit-test build link libcurl/openssl statically instead of
+# depending on whatever system libcurl happens to be installed (wasm target
+# is unaffected — the dep is host-only).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+zellij-utils = { version = "0.46.0", default-features = false, features = ["vendored_curl"] }
+
 [[bin]]
 name = "jump_to_tab"
 path = "src/main.rs"
